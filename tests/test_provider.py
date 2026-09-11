@@ -109,6 +109,12 @@ class MusicProvider:
             info=lambda *a, **k: None,
         )
 
+    def get_setup_value(self, key, default=None):
+        # the real host reads these from the setup flow's setup_data; the test config
+        # carries them directly
+        value = self.config.get_value(key)
+        return default if value is None else value
+
 
 mp.MusicProvider = MusicProvider
 

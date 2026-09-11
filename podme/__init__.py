@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
+from music_assistant_models.config_entries import ConfigEntry
 from music_assistant_models.enums import (
     ConfigEntryType,
     ContentType,
@@ -42,7 +42,6 @@ from music_assistant.controllers.cache import use_cache
 from music_assistant.helpers.podcast_parsers import rank_episodes_by_date
 from music_assistant.models.music_provider import MusicProvider
 from music_assistant.providers.podme.api import (
-    REGIONS,
     PodMeApi,
     PodMeApiError,
     PodMeAuthError,
@@ -105,17 +104,14 @@ class PodMeProvider(MusicProvider):
         return None
 
     async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
-        """Return Config entries to setup this provider."""
+        """
+        Return Config entries to setup this provider.
+
+        The account details are deliberately absent: config entries are resolved from an
+        existing provider instance, so they cannot be collected when the provider is first
+        added. They live in setup_flow.py and are read back with get_setup_value.
+        """
         return (
-            ConfigEntry(key=CONF_EMAIL, type=ConfigEntryType.STRING, required=True),
-            ConfigEntry(key=CONF_PASSWORD, type=ConfigEntryType.SECURE_STRING, required=True),
-            ConfigEntry(
-                key=CONF_REGION,
-                type=ConfigEntryType.STRING,
-                required=True,
-                default_value="NO",
-                options=[ConfigValueOption(key, title) for key, title in REGIONS],
-            ),
             ConfigEntry(
                 key=CONF_MAX_EPISODES,
                 type=ConfigEntryType.INTEGER,
@@ -135,11 +131,16 @@ class PodMeProvider(MusicProvider):
         """Handle async initialization of the provider."""
         self.max_episodes = int(str(self.config.get_value(CONF_MAX_EPISODES) or 0))
         stored = self.config.get_value(CONF_CREDENTIALS)
+        # collected by the setup flow, not by the (instance-resolved) config entries
+        email = str(self.get_setup_value(CONF_EMAIL) or "")
+        password = str(self.get_setup_value(CONF_PASSWORD) or "")
+        if not email or not password:
+            raise LoginFailed("No PodMe account configured; re-run the provider setup")
         self.api = PodMeApi(
             self.mass.http_session,
-            email=str(self.config.get_value(CONF_EMAIL)),
-            password=str(self.config.get_value(CONF_PASSWORD)),
-            region=str(self.config.get_value(CONF_REGION) or "NO"),
+            email=email,
+            password=password,
+            region=str(self.get_setup_value(CONF_REGION) or "NO"),
             credentials=str(stored) if stored else None,
             on_credentials=self._store_credentials,
         )

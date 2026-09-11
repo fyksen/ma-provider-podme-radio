@@ -26,8 +26,8 @@ contains the image's Python version, which changes between releases — the incl
 script finds it for you.
 
 ```bash
-git clone https://github.com/fyksen/podme-music-assistant.git
-cd podme-music-assistant
+git clone https://github.com/fyksen/ma-provider-podme-radio.git
+cd ma-provider-podme-radio
 ./install.sh
 ```
 
@@ -37,7 +37,7 @@ That prints the exact `volumes:` line for your setup, for example:
 services:
   music-assistant-server:
     volumes:
-      - /path/to/podme-music-assistant/podme:/app/venv/lib/python3.14/site-packages/music_assistant/providers/podme:ro
+      - /path/to/ma-provider-podme-radio/podme:/app/venv/lib/python3.14/site-packages/music_assistant/providers/podme:ro
 ```
 
 Add it to your `compose.yml`, then `docker compose up -d`.
