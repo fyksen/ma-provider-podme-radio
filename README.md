@@ -20,10 +20,75 @@ catalogue needs an active PodMe subscription, and free titles play without one.
 
 ## Install
 
-Music Assistant loads providers only from inside its own package directory, so
-installing means getting `podme/` to `music_assistant/providers/podme`. The path
-contains the image's Python version, which changes between releases — the included
-script finds it for you.
+Music Assistant only loads providers from inside its own package directory, so
+installing means getting `podme/` to `music_assistant/providers/podme`. How you do that
+depends on how you run the server.
+
+### Standalone Docker Compose — prebuilt image (easiest)
+
+A build of the upstream server image with this provider already inside, and its
+`podme-api` dependency pre-installed so the first start needs no network round trip.
+Swap your image and you are done; it survives restarts, recreation and
+`docker compose pull`.
+
+```yaml
+services:
+  music-assistant-server:
+    image: ghcr.io/fyksen/ma-provider-podme-radio:latest
+    # ...keep your existing volumes, network_mode, devices and environment
+```
+
+Then `docker compose up -d`.
+
+`:latest` tracks the upstream stable release and `:beta` the beta channel; both
+rebuild daily. To pin a deployment, use a `:latest-<run_id>` tag, or an
+`@sha256:` digest if you want a guaranteed-immutable reference.
+
+### Home Assistant OS / Supervised (add-on)
+
+The Supervisor owns the add-on's container definition, so there is no way to add a
+bind mount and nothing you put in `/config` is on the provider search path. The files
+have to be copied *inside* the container.
+
+You need a shell with **host Docker access**: the **Advanced SSH & Web Terminal**
+community add-on with **Protection mode off**. The official *Terminal & SSH* add-on is
+sandboxed and cannot reach Docker — the script says so and stops.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fyksen/ma-provider-podme-radio/main/scripts/install_provider.sh | sh
+```
+
+It finds the Music Assistant container (the Supervisor renamed its prefix from
+`addon_` to `app_`, so both are matched), detects the interpreter version, copies the
+provider in and restarts the container. On first load the server installs the
+`podme-api` dependency itself, so give it a moment before signing in.
+
+Re-run it to upgrade. Through a pipe, flags need the `sh -s --` separator — plain
+`| sh --force` makes the shell parse `--force` as its own option and fail:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fyksen/ma-provider-podme-radio/main/scripts/install_provider.sh | sh -s -- --force
+```
+
+> [!IMPORTANT]
+> This lives in the container's writable layer, so it is lost whenever the container
+> is **recreated** — an add-on update, or restarting the add-on from the Home
+> Assistant UI. Re-run the script after those. A plain `docker restart <container>`
+> preserves it.
+
+| Flag | Effect |
+| --- | --- |
+| `--container NAME` | Target a specific container instead of autodetecting |
+| `--source DIR` | Install from a local checkout instead of downloading |
+| `--repo-owner OWNER` | Download from your own fork |
+| `--branch REF` | Download a specific branch or tag |
+| `--force` | Overwrite without asking |
+| `--no-restart` | Copy only, leave the container alone |
+
+### Standalone Docker Compose — bind mount (for development)
+
+Mounting the working tree means edits land with a restart, which is what you want
+while changing the provider.
 
 ```bash
 git clone https://github.com/fyksen/ma-provider-podme-radio.git
@@ -42,11 +107,18 @@ services:
 
 Add it to your `compose.yml`, then `docker compose up -d`.
 
-Finally, in Music Assistant go to **Settings → Music Providers → Add Provider →
-PodMe** and sign in. The `podme-api` dependency is pinned in `manifest.json` and
-installed by Music Assistant itself when the provider first loads.
+| Command | What it does |
+| --- | --- |
+| `./install.sh` | Print the bind-mount line for a running container |
+| `./install.sh --copy` | Copy straight into the running container — lost when it is recreated |
+| `./install.sh --venv <path>` | Install into a source checkout or venv |
 
-### Settings
+Set `MA_CONTAINER=<name>` if your container isn't called `music-assistant-server`.
+
+### Finally
+
+In Music Assistant go to **Settings → Music Providers → Add Provider → PodMe** and
+sign in.
 
 | Setting | Meaning |
 | --- | --- |
@@ -54,15 +126,9 @@ installed by Music Assistant itself when the provider first loads.
 | Region | Which PodMe catalogue to show (default Norway) |
 | Maximum episodes per podcast | 0 for all; keeps the most recent otherwise |
 
-### Other install options
-
-| Command | What it does |
-| --- | --- |
-| `./install.sh` | Print the bind-mount line for a running container (recommended) |
-| `./install.sh --copy` | Copy straight into the running container — quick to try, lost when it is recreated |
-| `./install.sh --venv <path>` | Install into a source checkout or venv |
-
-Set `MA_CONTAINER=<name>` if your container isn't called `music-assistant-server`.
+If sign-in fails once, wait a minute before retrying: Schibsted throttles repeated
+attempts, and that looks the same as a wrong password. The session is cached after the
+first success, so this is a one-time risk.
 
 ## Notes and limitations
 
@@ -82,6 +148,11 @@ Set `MA_CONTAINER=<name>` if your container isn't called `music-assistant-server
   client id for both, marked `TODO: Check`, so sign-in may fail there. Norway and
   Sweden have real client ids.
 - **Podcasts only.** PodMe has no other media types.
+- **It downgrades `rich` in the server's environment.** `podme-api` pins
+  `rich<14`, so installing it moves the server's `rich` from 15.x down to 13.9.x.
+  Music Assistant and this provider both still import and run fine with that — it is
+  verified in the published image — but it is a shared dependency being changed, so
+  it is worth knowing about if something else in your server misbehaves.
 
 ## Relationship to `podme_api`
 
