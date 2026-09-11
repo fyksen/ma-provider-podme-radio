@@ -1,0 +1,12 @@
+# Never commit PodMe credentials or the cached Schibsted session
+.podme_token.json
+*token*.json
+*creds*.env
+.env
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+*.egg-info/

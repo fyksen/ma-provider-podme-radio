@@ -1,0 +1,13 @@
+{
+  "type": "music",
+  "domain": "podme",
+  "name": "PodMe",
+  "description": "Stream podcasts from PodMe, the Nordic podcast service. Requires a PodMe account; premium titles need an active subscription.",
+  "codeowners": ["@fyksen"],
+  "stage": "beta",
+  "requirements": ["podme-api==1.4.3"],
+  "documentation": "https://podme.com",
+  "credits": ["[podme_api](https://github.com/bendikrb/podme_api) by Bendik R. Brenne (MIT)"],
+  "multi_instance": false,
+  "icon": "mdi-podcast"
+}

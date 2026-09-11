@@ -1,0 +1,26 @@
+{
+  "config_entries": {
+    "email": {
+      "label": "E-mail",
+      "description": "The e-mail address of your PodMe account."
+    },
+    "password": {
+      "label": "Password",
+      "description": "The password of your PodMe account."
+    },
+    "region": {
+      "label": "Region",
+      "description": "The PodMe region your account belongs to. This decides which catalogue is shown."
+    },
+    "max_episodes": {
+      "label": "Maximum number of episodes per podcast (0 for all)",
+      "description": "Limits how many episodes are fetched for each podcast. The most recent episodes are kept. Useful for long-running series with hundreds of episodes."
+    },
+    "credentials": {
+      "label": "Stored session"
+    }
+  },
+  "manifest": {
+    "description": "Stream podcasts from PodMe, the Nordic podcast service. Requires a PodMe account; premium titles need an active subscription."
+  }
+}
