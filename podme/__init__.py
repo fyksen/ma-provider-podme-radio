@@ -466,7 +466,7 @@ class PodMeProvider(MusicProvider):
         if (spot := item.get("currentSpotSec")) is not None:
             try:
                 episode.resume_position_ms = int(spot) * 1000
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 episode.resume_position_ms = None
         # an episode the account cannot play is listed but not streamable
         if item.get("episodeCanBePlayed") is False:
