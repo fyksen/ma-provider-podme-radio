@@ -50,6 +50,7 @@ from music_assistant.providers.podme.api import (
     image_urls,
     parse_length,
 )
+from music_assistant.providers.podme.hls import iter_hls_audio
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
@@ -257,19 +258,65 @@ class PodMeProvider(MusicProvider):
         # would otherwise hide it from try_parse
         bare_url = stream_url.split("?", 1)[0]
         is_hls = bare_url.endswith(".m3u8")
+        if is_hls:
+            # a video episode: every url field points at an AES-128 encrypted HLS
+            # master playlist whose variants are video. Music Assistant's generic
+            # HLS handling picks the highest-bandwidth (video) variant and hands
+            # the child playlist to a separate ffmpeg process, which the PodMe CDN
+            # rejects - so the provider streams the decrypted audio itself instead,
+            # through get_audio_stream.
+            stream_type = StreamType.CUSTOM
+            content_type = ContentType.M4A
+        else:
+            stream_type = StreamType.HTTP
+            content_type = ContentType.try_parse(bare_url)
         return StreamDetails(
             provider=self.instance_id,
             item_id=item_id,
-            audio_format=AudioFormat(
-                content_type=ContentType.UNKNOWN if is_hls else ContentType.try_parse(bare_url)
-            ),
+            audio_format=AudioFormat(content_type=content_type),
             media_type=MediaType.PODCAST_EPISODE,
-            stream_type=StreamType.HLS if is_hls else StreamType.HTTP,
+            stream_type=stream_type,
             path=stream_url,
-            duration=parse_length(episode.get("length")),
+            # video episodes report their audio length as audioLength
+            duration=parse_length(episode.get("length") or episode.get("audioLength")),
             can_seek=True,
             allow_seek=True,
         )
+
+    async def get_audio_stream(
+        self, streamdetails: StreamDetails, seek_position: int = 0
+    ) -> AsyncGenerator[bytes]:
+        """
+        Return the (decrypted) audio stream for a PodMe video episode.
+
+        Called by Music Assistant for episodes whose stream details carry
+        StreamType.CUSTOM: PodMe serves those as AES-128 encrypted HLS video
+        streams, and the audio track is extracted and yielded here as
+        fragmented MP4 bytes, starting at seek_position.
+
+        :param streamdetails: The stream details of the episode to stream.
+        :param seek_position: The position to start streaming from, in seconds.
+        """
+        try:
+            _, episode_id = self._split_episode_id(streamdetails.item_id)
+            episode = await self.api.get_episode(int(episode_id))
+            # a fresh url: the signed CDN urls expire, and an episode that was
+            # audio when queued may have been re-published as video since
+            stream_url = await self.api.get_stream_url(episode)
+        except PodMeApiError as err:
+            raise UnplayableMediaError(f"PodMe could not serve this episode: {err}") from err
+        if not stream_url.split("?", 1)[0].endswith(".m3u8"):
+            # not a video episode after all: proxy the plain audio url
+            async with self.api.session.get(stream_url) as response:
+                response.raise_for_status()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    yield chunk
+            return
+        self.logger.debug("streaming HLS audio for episode %s from %ss", episode_id, seek_position)
+        async for chunk in iter_hls_audio(
+            self.api.session, stream_url, seek_position=seek_position
+        ):
+            yield chunk
 
     async def on_streamed(self, streamdetails: StreamDetails) -> None:
         """Report playback back to PodMe so progress follows the account."""
@@ -419,7 +466,7 @@ class PodMeProvider(MusicProvider):
         if (spot := item.get("currentSpotSec")) is not None:
             try:
                 episode.resume_position_ms = int(spot) * 1000
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 episode.resume_position_ms = None
         # an episode the account cannot play is listed but not streamable
         if item.get("episodeCanBePlayed") is False:
