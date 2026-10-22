@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
-from music_assistant_models.enums import MediaType
+from music_assistant_models.enums import MediaType, StreamType
 
 PROVIDER_DIR = str(Path(__file__).resolve().parent.parent / "podme")
 TOKEN_CACHE = Path(os.environ.get("PODME_TOKEN_CACHE", ".podme_token.json"))
@@ -236,17 +236,66 @@ async def main():
         check("streamdetails duration", sd.duration > 0, f"{sd.duration}s")
         check("streamdetails seekable", sd.can_seek and sd.allow_seek)
         print(f"     stream_type={sd.stream_type} content_type={sd.audio_format.content_type}")
+        if sd.stream_type == StreamType.CUSTOM:
+            # a video episode: the provider itself yields the decrypted fMP4 audio
+            agen = prov.get_audio_stream(sd)
+            blob = await anext(agen)
+            more = 0
+            for _ in range(5):
+                try:
+                    more += len(await anext(agen))
+                except StopAsyncIteration:
+                    break
+            await agen.aclose()
+            check("custom stream is fmp4", b"ftyp" in blob[:64], repr(blob[:8]))
+            check("custom stream yields audio", more > 50_000, f"{more} more bytes")
+        else:
+            async with session.get(sd.path, headers={"Range": "bytes=0-4095"}) as resp:
+                blob = await resp.read()
+            check("audio fetchable", resp.status in (200, 206), f"HTTP {resp.status} {len(blob)}B")
+            check(
+                "audio is real",
+                blob[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3") or b"ftyp" in blob[:64],
+                repr(blob[:4]),
+            )
+            full_len = resp.headers.get("Content-Range", "")
+            print(f"     content-range: {full_len}")
 
-        async with session.get(sd.path, headers={"Range": "bytes=0-4095"}) as resp:
-            blob = await resp.read()
-        check("audio fetchable", resp.status in (200, 206), f"HTTP {resp.status} {len(blob)}B")
-        check(
-            "audio is real",
-            blob[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3") or b"ftyp" in blob[:64],
-            repr(blob[:4]),
-        )
-        full_len = resp.headers.get("Content-Range", "")
-        print(f"     content-range: {full_len}")
+        print("\n== playback (video episode, HLS) ==")
+        # papaya publishes video episodes, which arrive as encrypted HLS and take
+        # the custom audio-stream path; exercise it explicitly when followed
+        if any(p.item_id == "papaya" for p in lib):
+            papaya_eps = [e async for e in prov.get_podcast_episodes("papaya")]
+            papaya_sd = await prov.get_stream_details(
+                papaya_eps[0].item_id, MediaType.PODCAST_EPISODE
+            )
+            print(f"     stream_type={papaya_sd.stream_type} duration={papaya_sd.duration}s")
+            check("video episode is CUSTOM", papaya_sd.stream_type == StreamType.CUSTOM)
+            check("video episode duration", papaya_sd.duration > 0, f"{papaya_sd.duration}s")
+            agen = prov.get_audio_stream(papaya_sd)
+            blob = await anext(agen)
+            more = 0
+            for _ in range(10):
+                try:
+                    more += len(await anext(agen))
+                except StopAsyncIteration:
+                    break
+            await agen.aclose()
+            check("video stream is fmp4", b"ftyp" in blob[:64], repr(blob[:8]))
+            check("video stream yields audio", more > 100_000, f"{more} more bytes")
+            # seek a minute in: the stream should start from a later segment
+            agen = prov.get_audio_stream(papaya_sd, seek_position=60)
+            await anext(agen)
+            seek_more = 0
+            for _ in range(10):
+                try:
+                    seek_more += len(await anext(agen))
+                except StopAsyncIteration:
+                    break
+            await agen.aclose()
+            check("video stream seeks", seek_more > 0, f"{seek_more} bytes after seeking")
+        else:
+            print("     papaya not followed - skipping (follow it to cover this path)")
 
         print("\n== error handling ==")
         try:

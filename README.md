@@ -144,6 +144,16 @@ first success, so this is a one-time risk.
 - **`isPremiumUser` is not the subscription signal.** It stays `false` even with an
   active subscription; `hasAccess` on `v2/subscriptions` is the account-level truth,
   and `episodeCanBePlayed` the per-episode one. Both are used here.
+- **Video episodes are streamed as audio.** PodMe publishes some episodes (e.g.
+  Papaya) as video: every stream URL the API returns is then an HLS master
+  playlist with video variants plus one audio-only rendition, and the media
+  segments are AES-128 encrypted. Music Assistant's generic HLS handling can't
+  play those (it selects the video variant, and the CDN only serves the child
+  playlists to the session that fetched the master), so the provider resolves
+  the audio-only variant itself, decrypts the segments and yields the audio to
+  the server as a custom stream. Playback starts after the first segments have
+  arrived, the rest downloads ahead while playing, and seeking is honoured to
+  within one segment (~3.2 s).
 - **Denmark and Finland are untested.** Upstream `podme-api` hardcodes Norway's OAuth
   client id for both, marked `TODO: Check`, so sign-in may fail there. Norway and
   Sweden have real client ids.
